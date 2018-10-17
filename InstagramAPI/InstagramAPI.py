@@ -973,6 +973,13 @@ class InstagramAPI:
             self.LastResponse = response
             self.LastJson = json.loads(response.text)
             return True
+		elif response.status_code == 404:
+            print("Request return " + str(response.status_code) + " error!")
+            return True
+        elif response.status_code == 503 or response.status_code == 502 or response.status_code == 504 or response.status_code == 500:
+            print("Request return " + str(response.status_code) + " error! Now sleep 60 seconds")
+            time.sleep(60)
+            return True
         else:
             print("Request return " + str(response.status_code) + " error!")
             # for debugging
