@@ -16,6 +16,7 @@ from datetime import datetime
 import calendar
 import os
 from requests_toolbelt import MultipartEncoder
+from re import search
 
 # Turn off InsecureRequestWarning
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
@@ -23,9 +24,9 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 try:
     from moviepy.editor import VideoFileClip
-except ImportError:
-    print("Fail to import moviepy. Need only for Video upload.")
-    
+except:
+    #print("Fail to import moviepy. Need only for Video upload.")
+    pass
 
 # The urllib library was split into other modules from Python 2 to Python 3
 if sys.version_info.major == 3:
@@ -35,8 +36,6 @@ try:
 except:
     # Issue 159, python3 import fix
     from .ImageUtils import getImageSize
-
-from .exceptions import SentryBlockException
 
 
 class InstagramAPI:
@@ -84,7 +83,7 @@ class InstagramAPI:
 
         if proxy is not None:
             print('Set proxy!')
-            proxies = {'http': proxy, 'https': proxy}
+            proxies = {'http': 'http://' + proxy, 'https': 'http://' + proxy}
             self.s.proxies.update(proxies)
 
     def login(self, force=False):
@@ -105,11 +104,11 @@ class InstagramAPI:
                     self.rank_token = "%s_%s" % (self.username_id, self.uuid)
                     self.token = self.LastResponse.cookies["csrftoken"]
 
-                    self.syncFeatures()
-                    self.autoCompleteUserList()
-                    self.timelineFeed()
-                    self.getv2Inbox()
-                    self.getRecentActivity()
+                    #self.syncFeatures()
+                    #self.autoCompleteUserList()
+                    #self.timelineFeed()
+                    #self.getv2Inbox()
+                    #self.getRecentActivity()
                     print("Login success!\n")
                     return True
 
@@ -166,6 +165,12 @@ class InstagramAPI:
                 self.expose()
         return False
 
+    def getUserId(self, username):
+        data = json.dumps({'_uuid': self.uuid,
+                           '_uid': self.username_id,
+                           '_csrftoken': self.token})
+        return self.SendRequest('users/search?q='+username+ '&rank_token=', self.generateSignature(data))
+		
     def uploadVideo(self, video, thumbnail, caption=None, upload_id=None, is_sidecar=None):
         if upload_id is None:
             upload_id = str(int(time.time() * 1000))
@@ -387,63 +392,7 @@ class InstagramAPI:
             except:
                 pass
             return False
-    
-    def direct_message(self, text, recipients):
-        if type(recipients) != type([]):
-            recipients = [str(recipients)]
-        recipient_users = '"",""'.join(str(r) for r in recipients)
-        endpoint = 'direct_v2/threads/broadcast/text/'
-        boundary = self.uuid
-        bodies   = [
-            {
-                'type' : 'form-data',
-                'name' : 'recipient_users',
-                'data' : '[["{}"]]'.format(recipient_users),
-            },
-            {
-                'type' : 'form-data',
-                'name' : 'client_context',
-                'data' : self.uuid,
-            },
-            {
-                'type' : 'form-data',
-                'name' : 'thread',
-                'data' : '["0"]',
-            },
-            {
-                'type' : 'form-data',
-                'name' : 'text',
-                'data' : text or '',
-            },
-        ]
-        data = self.buildBody(bodies,boundary)
-        self.s.headers.update (
-            {
-                'User-Agent' : self.USER_AGENT,
-                'Proxy-Connection' : 'keep-alive',
-                'Connection': 'keep-alive',
-                'Accept': '*/*',
-                'Content-Type': 'multipart/form-data; boundary={}'.format(boundary),
-                'Accept-Language': 'en-en',
-            }
-        )
-        #self.SendRequest(endpoint,post=data) #overwrites 'Content-type' header and boundary is missed
-        response = self.s.post(self.API_URL + endpoint, data=data)
-        
-        if response.status_code == 200:
-            self.LastResponse = response
-            self.LastJson = json.loads(response.text)
-            return True
-        else:
-            print ("Request return " + str(response.status_code) + " error!")
-            # for debugging
-            try:
-                self.LastResponse = response
-                self.LastJson = json.loads(response.text)
-            except:
-                pass
-            return False
-        
+
     def direct_share(self, media_id, recipients, text=None):
         if not isinstance(position, list):
             recipients = [str(recipients)]
@@ -570,11 +519,10 @@ class InstagramAPI:
                            'media_id': mediaId})
         return self.SendRequest('media/' + str(mediaId) + '/info/', self.generateSignature(data))
 
-    def deleteMedia(self, mediaId, media_type=1):
+    def deleteMedia(self, mediaId):
         data = json.dumps({'_uuid': self.uuid,
                            '_uid': self.username_id,
                            '_csrftoken': self.token,
-                           'media_type': media_type,
                            'media_id': mediaId})
         return self.SendRequest('media/' + str(mediaId) + '/delete/', self.generateSignature(data))
 
@@ -643,9 +591,6 @@ class InstagramAPI:
                            'email': email,
                            'gender': gender})
         return self.SendRequest('accounts/edit_profile/', self.generateSignature(data))
-
-    def getStory(self, usernameId):
-        return self.SendRequest('feed/user/' + str(usernameId) + '/reel_media/')
 
     def getUsernameInfo(self, usernameId):
         return self.SendRequest('users/' + str(usernameId) + '/info/')
@@ -717,7 +662,7 @@ class InstagramAPI:
         return query
 
     def getTimeline(self):
-        query = self.SendRequest('feed/timeline/?rank_token=' + str(self.rank_token) + '&ranked_content=true&')
+        query = self.SendRequest('feed/timeline/?rank_token=' + str(self.rank_token) + '&ranked_content=true&count=20')
         return query
 
     def getUserFeed(self, usernameId, maxid='', minTimestamp=None):
@@ -766,9 +711,6 @@ class InstagramAPI:
     def getSelfUserFollowers(self):
         return self.getUserFollowers(self.username_id)
 
-    def getPendingFollowRequests(self):
-        return self.SendRequest('friendships/pending?')
-
     def like(self, mediaId):
         data = json.dumps({'_uuid': self.uuid,
                            '_uid': self.username_id,
@@ -782,20 +724,6 @@ class InstagramAPI:
                            '_csrftoken': self.token,
                            'media_id': mediaId})
         return self.SendRequest('media/' + str(mediaId) + '/unlike/', self.generateSignature(data))
-
-    def save(self, mediaId):
-        data = json.dumps({'_uuid': self.uuid,
-                           '_uid': self.username_id,
-                           '_csrftoken': self.token,
-                           'media_id': mediaId})
-        return self.SendRequest('media/' + str(mediaId) + '/save/', self.generateSignature(data))
-
-    def unsave(self, mediaId):
-        data = json.dumps({'_uuid': self.uuid,
-                           '_uid': self.username_id,
-                           '_csrftoken': self.token,
-                           'media_id': mediaId})
-        return self.SendRequest('media/' + str(mediaId) + '/unsave/', self.generateSignature(data))
 
     def getMediaComments(self, mediaId, max_id=''):
         return self.SendRequest('media/' + mediaId + '/comments/?max_id=' + max_id)
@@ -814,24 +742,6 @@ class InstagramAPI:
     def backup(self):
         # TODO Instagram.php 1470-1485
         return False
-
-    def approve(self, userId):
-        data = json.dumps({
-        '_uuid'         : self.uuid,
-        '_uid'          : self.username_id,
-        'user_id'       : userId,
-        '_csrftoken'    : self.token
-        })
-        return self.SendRequest('friendships/approve/'+ str(userId) + '/', self.generateSignature(data))
-
-    def ignore(self, userId):
-        data = json.dumps({
-        '_uuid'         : self.uuid,
-        '_uid'          : self.username_id,
-        'user_id'       : userId,
-        '_csrftoken'    : self.token
-        })
-        return self.SendRequest('friendships/ignore/'+ str(userId) + '/', self.generateSignature(data))
 
     def follow(self, userId):
         data = json.dumps({'_uuid': self.uuid,
@@ -897,37 +807,6 @@ class InstagramAPI:
     def generateUploadId(self):
         return str(calendar.timegm(datetime.utcnow().utctimetuple()))
 
-    def createBroadcast(self, previewWidth=1080, previewHeight=1920, broadcastMessage=''):
-        data = json.dumps({'_uuid': self.uuid,
-                           '_uid': self.username_id,
-                           'preview_height': previewHeight,
-                           'preview_width': previewWidth,
-                           'broadcast_message': broadcastMessage,
-                           'broadcast_type': 'RTMP',
-                           'internal_only': 0,
-                           '_csrftoken': self.token})
-        return self.SendRequest('live/create/', self.generateSignature(data))
-
-    def startBroadcast(self, broadcastId, sendNotification=False):
-        data = json.dumps({'_uuid': self.uuid,
-                           '_uid': self.username_id,
-                           'should_send_notifications': int(sendNotification),
-                           '_csrftoken': self.token})
-        return self.SendRequest('live/' + str(broadcastId) + '/start', self.generateSignature(data))
-
-    def stopBroadcast(self, broadcastId):
-        data = json.dumps({'_uuid': self.uuid,
-                           '_uid': self.username_id,
-                           '_csrftoken': self.token})
-        return self.SendRequest('live/' + str(broadcastId) + '/end_broadcast/', self.generateSignature(data))
-
-    def addBroadcastToLive(self, broadcastId):
-        # broadcast has to be ended first!
-        data = json.dumps({'_uuid': self.uuid,
-                           '_uid': self.username_id,
-                           '_csrftoken': self.token})
-        return self.SendRequest('live/' + str(broadcastId) + '/add_to_post_live/', self.generateSignature(data))
-
     def buildBody(self, bodies, boundary):
         body = u''
         for b in bodies:
@@ -968,12 +847,12 @@ class InstagramAPI:
             except Exception as e:
                 print('Except on SendRequest (wait 60 sec and resend): ' + str(e))
                 time.sleep(60)
-
+		
         if response.status_code == 200:
             self.LastResponse = response
             self.LastJson = json.loads(response.text)
             return True
-		elif response.status_code == 404:
+        elif response.status_code == 404:
             print("Request return " + str(response.status_code) + " error!")
             return True
         elif response.status_code == 503 or response.status_code == 502 or response.status_code == 504 or response.status_code == 500:
@@ -986,11 +865,9 @@ class InstagramAPI:
             try:
                 self.LastResponse = response
                 self.LastJson = json.loads(response.text)
+                if self.LastJson['message'] == 'counter get error':
+                    return True
                 print(self.LastJson)
-                if 'error_type' in self.LastJson and self.LastJson['error_type'] == 'sentry_block':
-                    raise SentryBlockException(self.LastJson['message'])
-            except SentryBlockException:
-                raise
             except:
                 pass
             return False
@@ -1057,3 +934,53 @@ class InstagramAPI:
             except KeyError as e:
                 break
         return liked_items
+	
+    def getTimeline(self):
+        query = self.SendRequest('feed/timeline/?rank_token=' + str(self.rank_token) + '&ranked_content=false&')
+        return query
+		
+    def getStories(self, usernameId):
+        verify = True
+        if (not self.isLoggedIn and not login):
+            raise Exception("Not logged in!\n")
+        self.s.headers.update({'Connection': 'close',
+                               'Accept': '*/*',
+                               'Content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                               'Cookie2': '$Version=1',
+                               'Accept-Language': 'en-US',
+                               'User-Agent': self.USER_AGENT})
+        #from six.moves.urllib.request import urlopen
+        #storyIdJson = self.SendRequest('feed/user/' + str(usernameId) + '/reel_media/')
+        storyIdJson = self.SendRequest('feed/user/' + str(usernameId) + '/story/')
+        #storyIdJson = self.SendRequest('reels_tray')
+        #print(usernameId)
+        #print(json.dumps(self.LastJson, indent=4, sort_keys=True))
+        storyId = json.dumps(self.LastJson['reel']['latest_reel_media'])
+        reelMediaId = json.dumps(self.LastJson['reel']['items'][0]['pk'])
+        username = json.dumps(self.LastJson['reel']['user']['username'])
+        print('StoryID '+storyId)
+        print('reelMediaId '+reelMediaId)
+        #return self.SendRequest('feed/user/' + str(usernameId) + '/seen/')
+        #print(storyId)
+        
+        post = {
+            'reelId' : usernameId,
+            'reelMediaId' : reelMediaId,
+            'reelMediaOwnerId' : usernameId,
+            'reelMediaTakenAt' : storyId,
+            'viewSeenAt' : storyId
+        }
+        
+        data1 = json.dumps({'_uuid': self.uuid,
+                           '_uid': self.username_id,
+                           '_csrftoken': self.token})
+        #print(post)
+        print("https://www.instagram.com/stories/reel/seen/")
+        #response = self.s.post("https://www.instagram.com/stories/"+username+"/", data=post, verify=verify)
+        response = self.s.post("https://www.instagram.com/stories/reel/seen/", data=post, verify=verify)
+        #response = self.s.post('https://i.instagram.com/api/v1/feed/user/' + str(usernameId) + '/reel_media/'+storyId)
+        print(response)
+        #return self.SendRequest('feed/user/' + str(usernameId) + '/reel_media/'+str(storyId))
+        #url = "https://instagram.com/stories/{}/".format(str(usernameId))
+        #urlopen(url)
+        
